@@ -109,7 +109,7 @@ textarea{min-height:140px;font-family:ui-monospace,monospace;font-size:12px}
 var $=function(s){return document.querySelector(s)};
 var PAL=['#5eead4','#38bdf8','#a78bfa','#f472b6','#fbbf24','#fb923c','#86efac','#f87171','#67e8f9','#c4b5fd'];
 var DOW=['dom','seg','ter','qua','qui','sex','sáb'];
-var S={units:[],sessions:[],del:{}}, remote=null, tkRes=null;
+var S={units:[],sessions:[],del:{},cfg:null,adj:[]}, remote=null, tkRes=null;
 var view='ponto', cursor=new Date(), sel=null, busy=false, store=null;
 var dirty=new Set(), saving=false, ready=false;
 
@@ -148,6 +148,89 @@ function byUnit(a,b){
 }
 function sessionsIn(a,b){return S.sessions.filter(function(s){return ov(s,a,b)>0||(s.end==null&&s.start<b&&s.start>=a)}).sort(function(x,y){return x.start-y.start})}
 function daysWorked(a,b){var n=0;for(var d=a;d<b;d+=864e5){if(sumRange(d,d+864e5)>0)n++}return n}
+/*BANK-START*/
+function ymd(d){d=new Date(d);return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())}
+function parseYmd(s){var p=String(s||'').split('-');return new Date(+p[0],(+p[1]||1)-1,+p[2]||1).getTime()}
+function ensureCfg(){
+  var c=S.cfg;if(!c||typeof c!=='object')c=S.cfg={m:0};
+  if(!Array.isArray(c.t)||c.t.length!==7)c.t=[0,9,9,9,9,9,0];
+  if(!c.start)c.start=ymd(Date.now());
+  if(typeof c.open!=='number')c.open=0;
+  if(!c.off)c.off={};
+  if(typeof c.m!=='number')c.m=0;
+  if(!Array.isArray(S.adj))S.adj=[];
+}
+function cfgOn(){return !!(S.cfg&&S.cfg.m>0)}
+function nextDay(ds){var d=new Date(ds);d.setDate(d.getDate()+1);return d.getTime()}
+function targetMs(ds){var o=S.cfg.off[ymd(ds)];if(o&&o.v!=null)return o.v*60000;return (+S.cfg.t[new Date(ds).getDay()]||0)*36e5}
+function periodBal(a,b){
+  var td=sod(new Date()).getTime(),r={w:0,t:0,cr:0,db:0},d=a;
+  while(d<b&&d<td){var w=sumRange(d,nextDay(d)),t=targetMs(d);r.w+=w;r.t+=t;if(w>t)r.cr+=w-t;else r.db+=t-w;d=nextDay(d)}
+  r.b=r.w-r.t;return r;
+}
+function bank(){
+  var st=parseYmd(S.cfg.start),td=sod(new Date()).getTime();
+  var r=periodBal(st,td),cr=r.cr,db=r.db,o=S.cfg.open*60000;
+  if(o>0)cr+=o;else db-=o;
+  S.adj.forEach(function(x){var v=x.min*60000;if(v>0)cr+=v;else db-=v});
+  return {cr:cr,db:db,net:cr-db};
+}
+/*BANK-END*/
+function fmtSgn0(ms){return Math.abs(ms)<60000?'0min':(ms<0?'−':'+')+fmtDur(Math.abs(ms))}
+function bcol(ms){return ms>=60000?'var(--ok)':ms<=-60000?'var(--bad)':'var(--tx)'}
+function bankTotalCard(){
+  if(!cfgOn())return '<section class="card"><h2>Banco de horas</h2><div class="mut" style="font-size:14px">Veja quanto você deve ou tem sobrando com a empresa, contando só o total de horas de cada dia.</div><button class="btn in" data-act="bk-cfg">Configurar banco de horas</button></section>';
+  var b=bank(),t0=sod(new Date()).getTime(),tg=targetMs(t0),fal=tg?fmtDur(Math.max(0,tg-sumRange(t0,t0+864e5))):'—';
+  return '<section class="card"><h2>Banco de horas</h2><div class="big" style="color:'+bcol(b.net)+'">'+fmtSgn0(b.net)+'</div><div class="mut">'+(Math.abs(b.net)<60000?'em dia com a empresa':b.net>0?'sobrando com a empresa':'devendo à empresa')+' · até ontem</div><div class="kpis" style="margin-top:12px"><div class="kpi"><b style="color:var(--ok)">'+fmtDur(b.cr)+'</b><span>horas a mais</span></div><div class="kpi"><b style="color:var(--bad)">'+fmtDur(b.db)+'</b><span>horas a menos</span></div><div class="kpi"><b id="fth">'+fal+'</b><span>faltam hoje</span></div></div><div class="acts"><button class="btn ghost sm" data-act="bk-cfg">Metas e saldo inicial</button><button class="btn ghost sm" data-act="adj-add">+ Ajuste</button></div></section>';
+}
+function bankPeriodCard(a,b,title){
+  if(!cfgOn()||a>=sod(new Date()).getTime())return '';
+  var r=periodBal(a,b),td=sod(new Date()).getTime();
+  return '<section class="card"><h2>'+title+(td>a&&td<b?' · até ontem':'')+'</h2><div class="kpis"><div class="kpi"><b>'+fmtDur(r.t)+'</b><span>meta</span></div><div class="kpi"><b>'+fmtDur(r.w)+'</b><span>trabalhado</span></div><div class="kpi"><b style="color:'+bcol(r.b)+'">'+fmtSgn0(r.b)+'</b><span>saldo</span></div></div></section>';
+}
+function bankDayCard(ds){
+  if(!cfgOn())return '';
+  var w=sumRange(ds,nextDay(ds)),t=targetMs(ds),td=sod(new Date()).getTime(),o=S.cfg.off[ymd(ds)];
+  var tag=o&&o.v!=null?(o.v===0?' · folga/feriado':' · meta ajustada'):'';
+  var sd=ds>td?'—':ds===td?(w>=t?'meta batida':'faltam '+fmtDur(t-w)):fmtSgn0(w-t);
+  return '<section class="card"><div class="row"><div class="sp"><div class="mut">Meta do dia'+tag+'</div><div style="font-size:22px;font-weight:700">'+fmtDur(t)+'</div></div><div class="sp" style="text-align:right"><div class="mut">Saldo do dia</div><div style="font-size:22px;font-weight:700;color:'+(ds<td?bcol(w-t):'var(--tx)')+'">'+sd+'</div></div></div><div class="acts"><button class="btn ghost sm" data-act="bk-day" data-id="'+ymd(ds)+'">Alterar meta do dia (folga, feriado…)</button></div></section>';
+}
+function bankSettingsCard(){
+  var h='<section class="card"><h2>Banco de horas</h2>';
+  if(!cfgOn())h+='<div class="mut" style="font-size:14px">Ainda não configurado.</div><div class="acts"><button class="btn in sm" data-act="bk-cfg">Configurar</button></div>';
+  else{
+    var n=['dom','seg','ter','qua','qui','sex','sáb'];
+    h+='<div class="mut" style="font-size:14px">Metas: '+[1,2,3,4,5,6,0].map(function(i){return n[i]+' '+S.cfg.t[i]+'h'}).join(' · ')+'<br>Contando desde '+dmy(parseYmd(S.cfg.start))+(S.cfg.open?' · saldo inicial '+(S.cfg.open>0?'+':'−')+fmtDur(Math.abs(S.cfg.open)*60000):'')+'</div>';
+    if(S.adj.length)h+='<div style="margin-top:12px">'+S.adj.slice().sort(function(x,y){return x.date<y.date?1:-1}).map(function(x){return '<div class="u"><div class="m"><b>'+(x.min>0?'+':'−')+fmtDur(Math.abs(x.min)*60000)+'</b><small>'+dmy(parseYmd(x.date))+(x.note?' · '+esc(x.note):'')+'</small></div><button class="btn ghost sm" data-act="adj-del" data-id="'+x.id+'">Remover</button></div>'}).join('')+'</div>';
+    h+='<div class="acts"><button class="btn ghost sm" data-act="bk-cfg">Configurar</button><button class="btn ghost sm" data-act="adj-add">+ Ajuste</button></div>';
+  }
+  return h+'</section>';
+}
+function bankForm(){
+  var c=S.cfg,names=['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'];
+  modal('<h3>Banco de horas</h3><div class="mut" style="font-size:13px">Conta só o total de horas de cada dia, sem olhar atraso nem horário de entrada. Se você registra a saída no almoço, a meta é o horário menos a pausa (ex.: 10h–19h com 1h de almoço = 8h).</div><label class="f">Meta de horas em cada dia da semana</label><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'+[1,2,3,4,5,6,0].map(function(i){return '<div><small class="mut">'+names[i]+'</small><input type="number" step="0.25" min="0" max="24" id="bt'+i+'" value="'+c.t[i]+'"></div>'}).join('')+'</div><label class="f">Começar a contar em</label><input type="date" id="bs" value="'+c.start+'"><label class="f">Saldo inicial em horas (negativo se você devia)</label><input type="number" step="0.25" id="bo" value="'+(c.open/60)+'"><div class="acts"><button class="btn in sm" data-act="bk-save">Salvar</button><button class="btn ghost sm" data-act="close">Cancelar</button></div>');
+}
+function adjForm(){
+  modal('<h3>Ajuste no banco de horas</h3><div class="mut" style="font-size:13px">Para compensações e acertos combinados com a empresa. Positivo soma ao que sobra, negativo soma ao que você deve.</div><label class="f">Data</label><input type="date" id="ad" value="'+ymd(Date.now())+'"><label class="f">Horas (ex.: 2 ou -1,5)</label><input type="number" step="0.25" id="ah" placeholder="0"><label class="f">Observação</label><input id="an" placeholder="Ex.: folga compensada"><div class="acts"><button class="btn in sm" data-act="adj-save">Salvar</button><button class="btn ghost sm" data-act="close">Cancelar</button></div>');
+}
+function dayForm(key){
+  var o=S.cfg.off[key],def=S.cfg.t[new Date(parseYmd(key)).getDay()],cur=o&&o.v!=null?o.v/60:def;
+  modal('<h3>Meta de '+dmy(parseYmd(key))+'</h3><label class="f">Tipo do dia</label><select id="dk"><option value="def">Meta padrão ('+def+'h)</option><option value="off">Folga, feriado ou atestado (0h)</option><option value="custom">Outra meta</option></select><label class="f">Horas da meta (se escolher "Outra meta")</label><input type="number" step="0.25" min="0" max="24" id="dh" value="'+cur+'"><div class="acts"><button class="btn in sm" data-act="day-save" data-id="'+key+'">Salvar</button><button class="btn ghost sm" data-act="close">Cancelar</button></div>');
+  $('#dk').value=o&&o.v!=null?(o.v===0?'off':'custom'):'def';
+}
+function dayBankText(a){
+  if(!cfgOn()||a>sod(new Date()).getTime())return '';
+  var w=sumRange(a,nextDay(a)),t=targetMs(a);
+  return 'Meta do dia: '+fmtDur(t)+(a<sod(new Date()).getTime()?' · Saldo do dia: '+fmtSgn0(w-t):' · '+(w>=t?'meta batida':'faltam '+fmtDur(t-w)))+'\n';
+}
+function periodBankText(a,b){
+  if(!cfgOn()||a>=sod(new Date()).getTime())return '';
+  var r=periodBal(a,b);return 'Meta: '+fmtDur(r.t)+' · Trabalhado: '+fmtDur(r.w)+' · Saldo: '+fmtSgn0(r.b)+' (dias fechados)\n';
+}
+function totalBankText(){
+  if(!cfgOn())return '';
+  var b=bank();return '\nBanco de horas acumulado (até ontem): '+fmtSgn0(b.net)+' ('+(Math.abs(b.net)<60000?'em dia':b.net>0?'sobrando com a empresa':'devendo à empresa')+')\n• Horas a mais: '+fmtDur(b.cr)+'\n• Horas a menos: '+fmtDur(b.db)+'\n';
+}
 
 /* ---------- armazenamento ---------- */
 function setSync(k,t){var e=$('#sync');e.className='sync '+k;e.lastChild.textContent=t}
@@ -169,16 +252,17 @@ async function load(){
   if(store){
     try{
       var snap=await withTimeout(store.col.get(),10000);
-      var units=null,sess=[];
-      snap.docs.forEach(function(d){var v=d.data()||{};if(d.id==='units'&&Array.isArray(v.list))units=v.list;else if(d.id.indexOf('m-')===0&&Array.isArray(v.sessions))sess=sess.concat(v.sessions)});
-      if(units||sess.length){S={units:units||[],sessions:sess,del:{}};loaded=true}
+      var units=null,sess=[],cfgDoc=null;
+      snap.docs.forEach(function(d){var v=d.data()||{};if(d.id==='units'&&Array.isArray(v.list))units=v.list;else if(d.id==='cfg')cfgDoc=v;else if(d.id.indexOf('m-')===0&&Array.isArray(v.sessions))sess=sess.concat(v.sessions)});
+      if(units||sess.length||cfgDoc){S={units:units||[],sessions:sess,del:{},cfg:cfgDoc&&cfgDoc.cfg,adj:(cfgDoc&&cfgDoc.adj)||[]};loaded=true}
     }catch(e){}
   }
   if(!loaded){
     var l=localRead();
-    if(l&&(l.units||l.sessions)){S={units:l.units||[],sessions:l.sessions||[],del:l.del||{}};
-      if(store){dirty.add('units');S.sessions.forEach(function(s){dirty.add('m-'+monthKey(s.start))})}}
+    if(l&&(l.units||l.sessions)){S={units:l.units||[],sessions:l.sessions||[],del:l.del||{},cfg:l.cfg,adj:l.adj||[]};
+      if(store){dirty.add('units');dirty.add('cfg');S.sessions.forEach(function(s){dirty.add('m-'+monthKey(s.start))})}}
   }
+  ensureCfg();
   if(!S.units.length){
     S.units=[{id:'u-sion',name:'Sion',color:PAL[0]},{id:'u-cidade-nova',name:'Cidade Nova',color:PAL[1]}];
     dirty.add('units');
@@ -196,14 +280,18 @@ function mergeState(a,b){
   var canon={},remap={},list=[];
   units.forEach(function(u){var k=String(u.name||'').trim().toLowerCase();if(canon[k])remap[u.id]=canon[k];else{canon[k]=u.id;list.push(u)}});
   var sess=ml(a.sessions,b.sessions).filter(function(s){return !(del[s.id]&&del[s.id]>=(s.m||0))}).map(function(s){if(remap[s.unitId])s.unitId=remap[s.unitId];return s});
-  return {units:list,sessions:sess,del:del};
+  var ca=a.cfg||{m:0},cb=b.cfg||{m:0},base=(ca.m||0)>(cb.m||0)?ca:cb,off={};
+  [ca.off,cb.off].forEach(function(o){if(o)for(var k in o){if(!off[k]||(o[k].m||0)>=(off[k].m||0))off[k]=o[k]}});
+  var cfg=JSON.parse(JSON.stringify(base));cfg.off=off;
+  var adj=ml(a.adj,b.adj).filter(function(s){return !(del[s.id]&&del[s.id]>=(s.m||0))});
+  return {units:list,sessions:sess,del:del,cfg:cfg,adj:adj};
 }
 async function api(method,body){
   var r=await fetch('/api/ponto',{method:method,headers:{'content-type':'application/json','x-ponto-token':remote.token},body:body?JSON.stringify(body):undefined});
   if(!r.ok){var e=new Error('http '+r.status);e.code=r.status;throw e}
   return r.json();
 }
-async function remoteSyncOnce(){var r=await api('GET');S=mergeState(r,S);localWrite();await api('PUT',S)}
+async function remoteSyncOnce(){var r=await api('GET');S=mergeState(r,S);ensureCfg();localWrite();await api('PUT',S)}
 function askToken(msg){return new Promise(function(res){tkRes=res;modal('<h3>Senha de acesso</h3><div class="mut" style="font-size:14px">'+msg+'</div><label class="f">Senha</label><input id="tk" type="password" autocomplete="current-password"><div class="acts"><button class="btn in sm" data-act="tk-ok">Entrar</button><button class="btn ghost sm" data-act="tk-skip">Usar só neste aparelho</button></div>')})}
 async function remoteStart(){
   var msg='Digite a senha de acesso para sincronizar seus registros entre aparelhos.';
@@ -236,6 +324,7 @@ async function flush(){
     while(dirty.size){
       var k=dirty.values().next().value;
       if(k==='units')await store.col.doc('units').set({list:S.units});
+      else if(k==='cfg')await store.col.doc('cfg').set({cfg:S.cfg,adj:S.adj});
       else{var mk=k.slice(2);await store.col.doc(k).set({sessions:S.sessions.filter(function(s){return monthKey(s.start)===mk})})}
       dirty.delete(k);
     }
@@ -298,24 +387,26 @@ async function doDetect(){
 function unitLines(rows){return rows.map(function(r){return '• '+unitOf(r.id).name+': '+fmtDur(r.ms)+' ('+r.visits+' visita'+(r.visits>1?'s':'')+')'}).join('\n')}
 function dayText(d){
   var a=sod(d).getTime(),b=a+864e5,ev=sessionsIn(a,b);
-  var t='RELATÓRIO DIÁRIO — '+longDate(d)+' ('+dmy(d)+')\nTotal trabalhado: '+fmtDur(sumRange(a,b))+'\n\nRegistros:\n';
+  var t='RELATÓRIO DIÁRIO — '+longDate(d)+' ('+dmy(d)+')\nTotal trabalhado: '+fmtDur(sumRange(a,b))+'\n'+dayBankText(a)+'\nRegistros:\n';
   if(!ev.length)t+='(nenhum)\n';
   ev.forEach(function(s){var st=Math.max(s.start,a),en=Math.min(s.end==null?Date.now():s.end,b);t+='• '+hhmm(st)+' → '+(s.end==null&&en<b?'em andamento':hhmm(en))+'  '+unitOf(s.unitId).name+'  ('+fmtDur(en-st)+')'+(s.sLoc?'  📍'+mapLink(s.sLoc):'')+'\n'});
   t+='\nPor unidade:\n'+(unitLines(byUnit(a,b))||'(nenhuma)');return t;
 }
 function weekText(d){
   var a=sow(d).getTime(),b=a+7*864e5;
-  var t='RELATÓRIO SEMANAL — '+dmy(a)+' a '+dmy(b-864e5)+'\nTotal da semana: '+fmtDur(sumRange(a,b))+'\n\nPor dia:\n';
+  var t='RELATÓRIO SEMANAL — '+dmy(a)+' a '+dmy(b-864e5)+'\nTotal da semana: '+fmtDur(sumRange(a,b))+'\n'+periodBankText(a,b)+'\nPor dia:\n';
   for(var i=0;i<7;i++){var s=a+i*864e5;t+='• '+DOW[new Date(s).getDay()]+' '+dm(s)+': '+fmtDur(sumRange(s,s+864e5))+'\n'}
   var rows=byUnit(a,b);t+='\nPresença por unidade:\n';
   activeUnits().forEach(function(u){var r=rows.find(function(x){return x.id===u.id});t+='• '+u.name+': '+(r?fmtDur(r.ms)+' ('+r.visits+' visita'+(r.visits>1?'s':'')+')':'NÃO visitada')+'\n'});
+  t+=totalBankText();
   return t;
 }
 function monthText(d){
   var a=som(d).getTime(),e=new Date(a);e.setMonth(e.getMonth()+1);var b=e.getTime();
   var tot=sumRange(a,b),dw=daysWorked(a,b);
-  var t='RELATÓRIO MENSAL — '+new Date(a).toLocaleDateString('pt-BR',{month:'long',year:'numeric'})+'\nTotal: '+fmtDur(tot)+'\nDias trabalhados: '+dw+(dw?'\nMédia por dia: '+fmtDur(tot/dw):'')+'\n\nPor unidade:\n';
+  var t='RELATÓRIO MENSAL — '+new Date(a).toLocaleDateString('pt-BR',{month:'long',year:'numeric'})+'\nTotal: '+fmtDur(tot)+'\nDias trabalhados: '+dw+(dw?'\nMédia por dia: '+fmtDur(tot/dw):'')+'\n'+periodBankText(a,b)+'\nPor unidade:\n';
   byUnit(a,b).forEach(function(r){t+='• '+unitOf(r.id).name+': '+fmtDur(r.ms)+' ('+Math.round(r.ms/tot*100)+'%) · '+r.visits+' visitas · '+Object.keys(r.days).length+' dias\n'});
+  t+=totalBankText();
   return t;
 }
 function monthCSV(d){
@@ -348,12 +439,14 @@ function vPonto(){
   }
   var ru=byUnit(t0,t0+864e5);
   h+='<section class="card"><h2>Hoje</h2><div class="kpis"><div class="kpi"><b id="tdy">'+fmtDur(sumRange(t0,t0+864e5))+'</b><span>trabalhado</span></div><div class="kpi"><b>'+ru.length+'</b><span>unidade'+(ru.length===1?'':'s')+'</span></div><div class="kpi"><b>'+sessionsIn(t0,t0+864e5).length+'</b><span>registros</span></div></div></section>';
+  h+=bankTotalCard();
   return h;
 }
 function dnav(title){return '<div class="dn"><button data-act="prev">‹</button><div class="t">'+title+'</div><button data-act="next">›</button><button class="today" data-act="now">Hoje</button></div>'}
 function vDia(){
   var a=sod(cursor).getTime(),b=a+864e5,ev=sessionsIn(a,b),tot=sumRange(a,b),h=dnav(longDate(cursor));
   h+='<section class="card"><div class="mut">Total trabalhado</div><div class="big">'+fmtDur(tot)+'</div></section>';
+  h+=bankDayCard(a);
   h+='<section class="card"><h2>Linha do tempo</h2>';
   if(!ev.length)h+='<div class="empty">Nenhum registro neste dia.</div>';
   else{h+='<div class="tl">';ev.forEach(function(s){
@@ -372,6 +465,7 @@ function vSemana(){
   var days=[],mx=1;for(var i=0;i<7;i++){var s=a+i*864e5;var t=sumRange(s,s+864e5);days.push({s:s,t:t,u:byUnit(s,s+864e5)});mx=Math.max(mx,t)}
   var dw=days.filter(function(d){return d.t>0}).length;
   h+='<section class="card"><div class="kpis"><div class="kpi"><b>'+fmtDur(tot)+'</b><span>na semana</span></div><div class="kpi"><b>'+dw+'</b><span>dias</span></div><div class="kpi"><b>'+(dw?fmtDur(tot/dw):'—')+'</b><span>média/dia</span></div></div></section>';
+  h+=bankPeriodCard(a,b,'Banco da semana')+bankTotalCard();
   h+='<section class="card"><h2>Horas por dia</h2><div class="week">'+days.map(function(d){
     var seg=d.u.map(function(r){return '<div style="height:'+(r.ms/mx*100)+'px;background:'+unitOf(r.id).color+'"></div>'}).join('');
     return '<div class="wc"><em>'+(d.t?hdec(d.t):'')+'</em><div class="stack" style="height:'+(d.t/mx*100)+'px">'+seg+'</div><small>'+DOW[new Date(d.s).getDay()]+'<br>'+pad(new Date(d.s).getDate())+'</small></div>'}).join('')+'</div></section>';
@@ -387,6 +481,7 @@ function vMes(){
   var tot=sumRange(a,b),dw=daysWorked(a,b),rows=byUnit(a,b);
   var h=dnav(new Date(a).toLocaleDateString('pt-BR',{month:'long',year:'numeric'}));
   h+='<section class="card"><div class="kpis"><div class="kpi"><b>'+fmtDur(tot)+'</b><span>no mês</span></div><div class="kpi"><b>'+dw+'</b><span>dias</span></div><div class="kpi"><b>'+(dw?fmtDur(tot/dw):'—')+'</b><span>média/dia</span></div></div></section>';
+  h+=bankPeriodCard(a,b,'Banco do mês')+bankTotalCard();
   h+='<section class="card"><h2>Tempo em cada unidade</h2>'+(rows.length?rows.map(function(r){var u=unitOf(r.id),p=Math.round(r.ms/tot*100);return '<div class="ub"><div class="l"><span><i class="dot" style="background:'+u.color+'"></i>'+esc(u.name)+'</span><span>'+fmtDur(r.ms)+' · '+p+'%</span></div><div class="bar"><i style="width:'+p+'%;background:'+u.color+'"></i></div><div class="mut" style="font-size:12px;margin-top:4px">'+r.visits+' visitas · '+Object.keys(r.days).length+' dias</div></div>'}).join(''):'<div class="empty">Sem registros neste mês.</div>')+'</section>';
   var first=(new Date(a).getDay()+6)%7,n=Math.round((b-a)/864e5),mx=1,ds=[];
   for(var i=0;i<n;i++){var t=sumRange(a+i*864e5,a+(i+1)*864e5);ds.push(t);mx=Math.max(mx,t)}
@@ -402,6 +497,7 @@ function vUnid(){
   var all=S.units;
   h+=all.map(function(u){return '<div class="u"><span class="dot" style="background:'+u.color+';width:14px;height:14px"></span><div class="m"><b>'+esc(u.name)+(u.archived?' <small>(arquivada)</small>':'')+'</b><small>'+(u.lat!=null?'📍 local salvo':'sem local salvo — será salvo na 1ª entrada')+'</small></div><button class="btn ghost sm" data-act="uedit" data-id="'+u.id+'">Editar</button></div>'}).join('');
   h+='<button class="btn in" data-act="uadd">+ Nova unidade</button></section>';
+  h+=bankSettingsCard();
   h+='<section class="card"><h2>Backup do histórico</h2><div class="mut" style="font-size:14px">Guarde uma cópia de vez em quando, principalmente se usar este site direto no navegador.</div><div class="acts"><button class="btn ghost sm" data-act="bk-export">⬇ Exportar backup</button><button class="btn ghost sm" data-act="bk-import">⬆ Importar backup</button>'+(remote?'<button class="btn ghost sm" data-act="tk-reset">🔑 Trocar senha</button>':'')+'</div><input type="file" id="bkfile" accept=".json,application/json" style="display:none"></section>';
   h+='<div class="note">A 1ª entrada em cada unidade, com a localização liberada, guarda o endereço dela. Depois, o botão “Detectar unidade” identifica onde você está sozinho. Se o navegador não liberar a localização, o ponto é registrado igual, só sem o mapa.</div>';
   return h;
@@ -422,6 +518,7 @@ function tick(){
   $('#dt').textContent=longDate(n);
   var a=activeSess(),t=$('#tmr');if(a&&t)t.textContent=fmtHMS(Date.now()-a.start);
   var td=$('#tdy');if(td){var t0=sod(n).getTime();td.textContent=fmtDur(sumRange(t0,t0+864e5))}
+  var fh=$('#fth');if(fh&&cfgOn()){var t1=sod(n).getTime(),tg=targetMs(t1);fh.textContent=tg?fmtDur(Math.max(0,tg-sumRange(t1,t1+864e5))):'—'}
 }
 
 /* ---------- modais ---------- */
@@ -476,11 +573,28 @@ document.addEventListener('click',async function(ev){
     closeModal();render();toast('Registro salvo.');return}
   if(act==='sdel'){var i=S.sessions.findIndex(function(x){return x.id===id});if(i>=0){var m=monthKey(S.sessions[i].start),did=S.sessions[i].id;S.sessions.splice(i,1);S.del=S.del||{};S.del[did]=Date.now();touch('m-'+m)}closeModal();render();toast('Registro excluído.');return}
   if(act==='bk-export'){
-    var txt=JSON.stringify({v:1,exportado:new Date().toISOString(),units:S.units,sessions:S.sessions});
+    var txt=JSON.stringify({v:1,exportado:new Date().toISOString(),units:S.units,sessions:S.sessions,del:S.del,cfg:S.cfg,adj:S.adj});
     try{var bl=new Blob([txt],{type:'application/json'}),url=URL.createObjectURL(bl),lk=document.createElement('a');lk.href=url;lk.download='ponto-backup-'+toLocalInput(Date.now()).slice(0,10)+'.json';document.body.appendChild(lk);lk.click();lk.remove();setTimeout(function(){URL.revokeObjectURL(url)},2000);toast('Backup gerado.')}
     catch(e){copyText(txt)}
     return}
   if(act==='bk-import'){var f=$('#bkfile');if(f)f.click();return}
+  if(act==='bk-cfg'){bankForm();return}
+  if(act==='bk-save'){
+    var tt=[];for(var q=0;q<7;q++){var tv=parseFloat(($('#bt'+q)||{}).value);tt[q]=isNaN(tv)?0:Math.max(0,Math.min(24,tv))}
+    var ov2=parseFloat(($('#bo')||{}).value);
+    S.cfg.t=tt;S.cfg.start=($('#bs')||{}).value||ymd(Date.now());S.cfg.open=Math.round((isNaN(ov2)?0:ov2)*60);S.cfg.m=Date.now();
+    touch('cfg');closeModal();render();toast('Banco de horas salvo.');return}
+  if(act==='adj-add'){adjForm();return}
+  if(act==='adj-save'){
+    var ah=parseFloat(($('#ah')||{}).value);if(isNaN(ah)||ah===0){toast('Informe as horas do ajuste.');return}
+    S.adj.push({id:uid(),date:($('#ad')||{}).value||ymd(Date.now()),min:Math.round(ah*60),note:(($('#an')||{}).value||'').trim(),m:Date.now()});
+    touch('cfg');closeModal();render();toast('Ajuste salvo.');return}
+  if(act==='adj-del'){S.adj=S.adj.filter(function(x){return x.id!==id});S.del=S.del||{};S.del[id]=Date.now();touch('cfg');render();return}
+  if(act==='bk-day'){dayForm(id);return}
+  if(act==='day-save'){
+    var kd=$('#dk').value,hv=parseFloat($('#dh').value);
+    S.cfg.off[id]=kd==='def'?{v:null,m:Date.now()}:kd==='off'?{v:0,m:Date.now()}:{v:Math.round((isNaN(hv)?0:hv)*60),m:Date.now()};
+    touch('cfg');closeModal();render();return}
   if(act==='uadd'){unitForm(null);return}
   if(act==='uedit'){unitForm(S.units.find(function(u){return u.id===id}));return}
   if(act==='usave'){
@@ -501,13 +615,10 @@ document.addEventListener('change',function(ev){
     try{
       var d=JSON.parse(r.result);
       if(!d||!Array.isArray(d.units)||!Array.isArray(d.sessions))throw new Error('formato');
-      var ids={};S.sessions.forEach(function(s){ids[s.id]=1});
-      var add=d.sessions.filter(function(s){return s&&s.id&&!ids[s.id]&&typeof s.start==='number'});
-      var uids={};S.units.forEach(function(u){uids[u.id]=1});
-      d.units.forEach(function(u){if(u&&u.id&&!uids[u.id])S.units.push(u)});
-      S.sessions=S.sessions.concat(add);
-      var keys=['units'];add.forEach(function(s){keys.push('m-'+monthKey(s.start))});
-      touch.apply(null,keys);render();toast(add.length+' registro(s) importado(s).');
+      var before=S.sessions.length;
+      S=mergeState(S,{units:d.units,sessions:d.sessions,del:d.del||{},cfg:d.cfg,adj:d.adj});ensureCfg();
+      var keys=['units','cfg'];S.sessions.forEach(function(s){keys.push('m-'+monthKey(s.start))});
+      touch.apply(null,keys);render();toast((S.sessions.length-before)+' registro(s) novo(s) importado(s).');
     }catch(e){toast('Arquivo de backup inválido.')}
   };
   r.readAsText(f);

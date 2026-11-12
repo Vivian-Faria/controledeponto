@@ -28,7 +28,7 @@ export default async (req) => {
 
   if (req.method === "GET") {
     const data = await store.get("state", { type: "json" });
-    return json(data || { units: [], sessions: [], del: {} });
+    return json(data || { units: [], sessions: [], del: {}, cfg: null, adj: [] });
   }
 
   if (req.method === "PUT") {
@@ -39,7 +39,13 @@ export default async (req) => {
     if (!body || !Array.isArray(body.units) || !Array.isArray(body.sessions)) {
       return json({ error: "formato inválido" }, 400);
     }
-    await store.setJSON("state", { units: body.units, sessions: body.sessions, del: body.del || {} });
+    await store.setJSON("state", {
+      units: body.units,
+      sessions: body.sessions,
+      del: body.del || {},
+      cfg: body.cfg || null,
+      adj: Array.isArray(body.adj) ? body.adj : [],
+    });
     return json({ ok: true });
   }
 
