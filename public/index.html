@@ -12,6 +12,8 @@ button{font:inherit;color:inherit;cursor:pointer;border:0;background:none}
 .app{max-width:560px;margin:0 auto;padding:18px 16px 70px}
 header.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
 header.top h1{font-size:15px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--mut);margin:0}
+.rf{display:inline-flex;gap:6px;align-items:center;padding:8px 14px;border-radius:99px;background:var(--card2);border:1px solid var(--line);font-size:13px;font-weight:600}
+.rf:active{transform:scale(.97)}
 .sync{font-size:12px;color:var(--mut);display:flex;gap:6px;align-items:center}
 .sync i{width:8px;height:8px;border-radius:50%;background:var(--mut);display:inline-block}
 .sync.ok i{background:var(--ok)}.sync.err i{background:var(--warn)}
@@ -97,7 +99,8 @@ textarea{min-height:140px;font-family:ui-monospace,monospace;font-size:12px}
 </head>
 <body>
 <div class="app">
-  <header class="top"><h1 id="ttl">Ponto de presença</h1><div class="sync" id="sync"><i></i><span>carregando…</span></div></header>
+  <header class="top"><h1 id="ttl">Ponto de presença</h1><button class="rf" data-act="reload" aria-label="Atualizar a página">↻ Atualizar</button></header>
+  <div class="sync" id="sync" style="justify-content:flex-end;margin:-4px 0 10px"><i></i><span>carregando…</span></div>
   <nav class="nav"><div class="in" id="nav"></div></nav>
   <main id="main"></main>
 </div>
@@ -178,10 +181,14 @@ function bank(){
 /*BANK-END*/
 function fmtSgn0(ms){return Math.abs(ms)<60000?'0min':(ms<0?'−':'+')+fmtDur(Math.abs(ms))}
 function bcol(ms){return ms>=60000?'var(--ok)':ms<=-60000?'var(--bad)':'var(--tx)'}
+function bankNet(){
+  var b=bank(),t0=sod(new Date()).getTime(),x=sumRange(t0,nextDay(t0))-targetMs(t0);
+  return b.net+Math.max(0,x);
+}
 function bankTotalCard(){
   if(!cfgOn())return '<section class="card"><h2>Banco de horas</h2><div class="mut" style="font-size:14px">Veja quanto você deve ou tem sobrando com a empresa, contando só o total de horas de cada dia.</div><button class="btn in" data-act="bk-cfg">Configurar banco de horas</button></section>';
-  var b=bank(),t0=sod(new Date()).getTime(),tg=targetMs(t0),fal=tg?fmtDur(Math.max(0,tg-sumRange(t0,t0+864e5))):'—';
-  return '<section class="card"><h2>Banco de horas</h2><div class="big" style="color:'+bcol(b.net)+'">'+fmtSgn0(b.net)+'</div><div class="mut">'+(Math.abs(b.net)<60000?'em dia com a empresa':b.net>0?'sobrando com a empresa':'devendo à empresa')+' · até ontem</div><div class="mut" style="font-size:13px;margin-top:4px">Contando hoje (parcial): <b style="color:'+bcol(b.net+sumRange(t0,t0+864e5)-tg)+'">'+fmtSgn0(b.net+sumRange(t0,t0+864e5)-tg)+'</b></div><div class="kpis" style="margin-top:12px"><div class="kpi"><b style="color:var(--ok)">'+fmtDur(b.cr)+'</b><span>horas a mais</span></div><div class="kpi"><b style="color:var(--bad)">'+fmtDur(b.db)+'</b><span>horas a menos</span></div><div class="kpi"><b id="fth">'+fal+'</b><span>faltam hoje</span></div></div><div class="acts"><button class="btn ghost sm" data-act="bk-cfg">Metas e saldo inicial</button><button class="btn ghost sm" data-act="adj-add">+ Ajuste</button></div></section>';
+  var n=bankNet();
+  return '<section class="card"><h2>Banco de horas</h2><div class="big" style="color:'+bcol(n)+'">'+fmtSgn0(n)+'</div><div class="mut">'+(Math.abs(n)<60000?'em dia com a empresa':n>0?'sobrando com a empresa':'devendo à empresa')+'</div><div class="acts"><button class="btn ghost sm" data-act="bk-cfg">Metas e saldo inicial</button><button class="btn ghost sm" data-act="adj-add">+ Ajuste</button></div></section>';
 }
 function bankPeriodCard(a,b,title,noun){
   var td=sod(new Date()).getTime();
@@ -236,7 +243,7 @@ function periodBankText(a,b,noun){
 }
 function totalBankText(){
   if(!cfgOn())return '';
-  var b=bank(),t0=sod(new Date()).getTime(),hj=b.net+sumRange(t0,nextDay(t0))-targetMs(t0);return '\nBanco de horas acumulado (até ontem): '+fmtSgn0(b.net)+' ('+(Math.abs(b.net)<60000?'em dia':b.net>0?'sobrando com a empresa':'devendo à empresa')+')\n• Horas a mais: '+fmtDur(b.cr)+'\n• Horas a menos: '+fmtDur(b.db)+'\n• Contando hoje (parcial): '+fmtSgn0(hj)+'\n';
+  var n=bankNet();return '\nBanco de horas acumulado: '+fmtSgn0(n)+' ('+(Math.abs(n)<60000?'em dia com a empresa':n>0?'sobrando com a empresa':'devendo à empresa')+')\n';
 }
 
 /* ---------- armazenamento ---------- */
@@ -552,6 +559,7 @@ document.addEventListener('click',async function(ev){
   if(act==='tk-skip'){var f2=tkRes;tkRes=null;closeModal();if(f2)f2(null);return}
   if(act==='tk-reset'){try{localStorage.removeItem('ponto_token')}catch(e){}location.reload();return}
   if(act==='close'){closeModal();return}
+  if(act==='reload'){location.reload();return}
   if(act==='tab'){view=id;cursor=new Date();render();window.scrollTo(0,0);return}
   if(act==='pick'){sel=id;render();return}
   if(act==='in'){if(sel)doIn(sel);return}
