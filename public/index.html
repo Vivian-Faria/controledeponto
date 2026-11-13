@@ -163,9 +163,9 @@ function ensureCfg(){
 function cfgOn(){return !!(S.cfg&&S.cfg.m>0)}
 function nextDay(ds){var d=new Date(ds);d.setDate(d.getDate()+1);return d.getTime()}
 function targetMs(ds){var o=S.cfg.off[ymd(ds)];if(o&&o.v!=null)return o.v*60000;return (+S.cfg.t[new Date(ds).getDay()]||0)*36e5}
-function periodBal(a,b){
-  var td=sod(new Date()).getTime(),r={w:0,t:0,cr:0,db:0},d=a;
-  while(d<b&&d<td){var w=sumRange(d,nextDay(d)),t=targetMs(d);r.w+=w;r.t+=t;if(w>t)r.cr+=w-t;else r.db+=t-w;d=nextDay(d)}
+function periodBal(a,b,inc){
+  var td=sod(new Date()).getTime(),lim=inc?nextDay(td):td,r={w:0,t:0,cr:0,db:0},d=a;
+  while(d<b&&d<lim){var w=sumRange(d,nextDay(d)),t=targetMs(d);r.w+=w;r.t+=t;if(w>t)r.cr+=w-t;else r.db+=t-w;d=nextDay(d)}
   r.b=r.w-r.t;return r;
 }
 function bank(){
@@ -181,12 +181,14 @@ function bcol(ms){return ms>=60000?'var(--ok)':ms<=-60000?'var(--bad)':'var(--tx
 function bankTotalCard(){
   if(!cfgOn())return '<section class="card"><h2>Banco de horas</h2><div class="mut" style="font-size:14px">Veja quanto você deve ou tem sobrando com a empresa, contando só o total de horas de cada dia.</div><button class="btn in" data-act="bk-cfg">Configurar banco de horas</button></section>';
   var b=bank(),t0=sod(new Date()).getTime(),tg=targetMs(t0),fal=tg?fmtDur(Math.max(0,tg-sumRange(t0,t0+864e5))):'—';
-  return '<section class="card"><h2>Banco de horas</h2><div class="big" style="color:'+bcol(b.net)+'">'+fmtSgn0(b.net)+'</div><div class="mut">'+(Math.abs(b.net)<60000?'em dia com a empresa':b.net>0?'sobrando com a empresa':'devendo à empresa')+' · até ontem</div><div class="kpis" style="margin-top:12px"><div class="kpi"><b style="color:var(--ok)">'+fmtDur(b.cr)+'</b><span>horas a mais</span></div><div class="kpi"><b style="color:var(--bad)">'+fmtDur(b.db)+'</b><span>horas a menos</span></div><div class="kpi"><b id="fth">'+fal+'</b><span>faltam hoje</span></div></div><div class="acts"><button class="btn ghost sm" data-act="bk-cfg">Metas e saldo inicial</button><button class="btn ghost sm" data-act="adj-add">+ Ajuste</button></div></section>';
+  return '<section class="card"><h2>Banco de horas</h2><div class="big" style="color:'+bcol(b.net)+'">'+fmtSgn0(b.net)+'</div><div class="mut">'+(Math.abs(b.net)<60000?'em dia com a empresa':b.net>0?'sobrando com a empresa':'devendo à empresa')+' · até ontem</div><div class="mut" style="font-size:13px;margin-top:4px">Contando hoje (parcial): <b style="color:'+bcol(b.net+sumRange(t0,t0+864e5)-tg)+'">'+fmtSgn0(b.net+sumRange(t0,t0+864e5)-tg)+'</b></div><div class="kpis" style="margin-top:12px"><div class="kpi"><b style="color:var(--ok)">'+fmtDur(b.cr)+'</b><span>horas a mais</span></div><div class="kpi"><b style="color:var(--bad)">'+fmtDur(b.db)+'</b><span>horas a menos</span></div><div class="kpi"><b id="fth">'+fal+'</b><span>faltam hoje</span></div></div><div class="acts"><button class="btn ghost sm" data-act="bk-cfg">Metas e saldo inicial</button><button class="btn ghost sm" data-act="adj-add">+ Ajuste</button></div></section>';
 }
-function bankPeriodCard(a,b,title){
-  if(!cfgOn()||a>=sod(new Date()).getTime())return '';
-  var r=periodBal(a,b),td=sod(new Date()).getTime();
-  return '<section class="card"><h2>'+title+(td>a&&td<b?' · até ontem':'')+'</h2><div class="kpis"><div class="kpi"><b>'+fmtDur(r.t)+'</b><span>meta</span></div><div class="kpi"><b>'+fmtDur(r.w)+'</b><span>trabalhado</span></div><div class="kpi"><b style="color:'+bcol(r.b)+'">'+fmtSgn0(r.b)+'</b><span>saldo</span></div></div></section>';
+function bankPeriodCard(a,b,title,noun){
+  var td=sod(new Date()).getTime();
+  if(!cfgOn()||a>=nextDay(td))return '';
+  var inc=td>=a&&td<b,r=periodBal(a,b,inc),c=inc?periodBal(a,b):r;
+  var lab=Math.abs(r.b)<60000?'Em dia com a meta':(r.b>0?'Horas a mais ':'Horas a menos ')+noun;
+  return '<section class="card"><h2>'+title+'</h2><div class="mut">'+lab+'</div><div class="big" style="color:'+bcol(r.b)+'">'+fmtSgn0(r.b)+'</div>'+(inc?'<div class="mut" style="font-size:13px">contando hoje (parcial) · até ontem: <b style="color:'+bcol(c.b)+'">'+fmtSgn0(c.b)+'</b></div>':'')+'<div class="kpis" style="margin-top:12px"><div class="kpi"><b>'+fmtDur(r.t)+'</b><span>meta</span></div><div class="kpi"><b>'+fmtDur(r.w)+'</b><span>trabalhado</span></div><div class="kpi"><b style="color:'+bcol(r.b)+'">'+fmtSgn0(r.b)+'</b><span>saldo</span></div></div></section>';
 }
 function bankDayCard(ds){
   if(!cfgOn())return '';
@@ -223,13 +225,18 @@ function dayBankText(a){
   var w=sumRange(a,nextDay(a)),t=targetMs(a);
   return 'Meta do dia: '+fmtDur(t)+(a<sod(new Date()).getTime()?' · Saldo do dia: '+fmtSgn0(w-t):' · '+(w>=t?'meta batida':'faltam '+fmtDur(t-w)))+'\n';
 }
-function periodBankText(a,b){
-  if(!cfgOn()||a>=sod(new Date()).getTime())return '';
-  var r=periodBal(a,b);return 'Meta: '+fmtDur(r.t)+' · Trabalhado: '+fmtDur(r.w)+' · Saldo: '+fmtSgn0(r.b)+' (dias fechados)\n';
+function periodBankText(a,b,noun){
+  var td=sod(new Date()).getTime();
+  if(!cfgOn()||a>=nextDay(td))return '';
+  var inc=td>=a&&td<b,r=periodBal(a,b,inc),c=periodBal(a,b);
+  var lab=Math.abs(r.b)<60000?'Em dia com a meta':(r.b>0?'Horas a mais ':'Horas a menos ')+noun;
+  var s='Meta: '+fmtDur(r.t)+' · Trabalhado: '+fmtDur(r.w)+'\n➜ '+lab+': '+fmtSgn0(r.b)+(inc?' (contando hoje, parcial)':'')+'\n';
+  if(inc)s+='Até ontem (dias fechados): '+fmtSgn0(c.b)+'\n';
+  return s;
 }
 function totalBankText(){
   if(!cfgOn())return '';
-  var b=bank();return '\nBanco de horas acumulado (até ontem): '+fmtSgn0(b.net)+' ('+(Math.abs(b.net)<60000?'em dia':b.net>0?'sobrando com a empresa':'devendo à empresa')+')\n• Horas a mais: '+fmtDur(b.cr)+'\n• Horas a menos: '+fmtDur(b.db)+'\n';
+  var b=bank(),t0=sod(new Date()).getTime(),hj=b.net+sumRange(t0,nextDay(t0))-targetMs(t0);return '\nBanco de horas acumulado (até ontem): '+fmtSgn0(b.net)+' ('+(Math.abs(b.net)<60000?'em dia':b.net>0?'sobrando com a empresa':'devendo à empresa')+')\n• Horas a mais: '+fmtDur(b.cr)+'\n• Horas a menos: '+fmtDur(b.db)+'\n• Contando hoje (parcial): '+fmtSgn0(hj)+'\n';
 }
 
 /* ---------- armazenamento ---------- */
@@ -394,7 +401,7 @@ function dayText(d){
 }
 function weekText(d){
   var a=sow(d).getTime(),b=a+7*864e5;
-  var t='RELATÓRIO SEMANAL — '+dmy(a)+' a '+dmy(b-864e5)+'\nTotal da semana: '+fmtDur(sumRange(a,b))+'\n'+periodBankText(a,b)+'\nPor dia:\n';
+  var t='RELATÓRIO SEMANAL — '+dmy(a)+' a '+dmy(b-864e5)+'\nTotal da semana: '+fmtDur(sumRange(a,b))+'\n'+periodBankText(a,b,'na semana')+'\nPor dia:\n';
   for(var i=0;i<7;i++){var s=a+i*864e5;t+='• '+DOW[new Date(s).getDay()]+' '+dm(s)+': '+fmtDur(sumRange(s,s+864e5))+'\n'}
   var rows=byUnit(a,b);t+='\nPresença por unidade:\n';
   activeUnits().forEach(function(u){var r=rows.find(function(x){return x.id===u.id});t+='• '+u.name+': '+(r?fmtDur(r.ms)+' ('+r.visits+' visita'+(r.visits>1?'s':'')+')':'NÃO visitada')+'\n'});
@@ -404,7 +411,7 @@ function weekText(d){
 function monthText(d){
   var a=som(d).getTime(),e=new Date(a);e.setMonth(e.getMonth()+1);var b=e.getTime();
   var tot=sumRange(a,b),dw=daysWorked(a,b);
-  var t='RELATÓRIO MENSAL — '+new Date(a).toLocaleDateString('pt-BR',{month:'long',year:'numeric'})+'\nTotal: '+fmtDur(tot)+'\nDias trabalhados: '+dw+(dw?'\nMédia por dia: '+fmtDur(tot/dw):'')+'\n'+periodBankText(a,b)+'\nPor unidade:\n';
+  var t='RELATÓRIO MENSAL — '+new Date(a).toLocaleDateString('pt-BR',{month:'long',year:'numeric'})+'\nTotal: '+fmtDur(tot)+'\nDias trabalhados: '+dw+(dw?'\nMédia por dia: '+fmtDur(tot/dw):'')+'\n'+periodBankText(a,b,'no mês')+'\nPor unidade:\n';
   byUnit(a,b).forEach(function(r){t+='• '+unitOf(r.id).name+': '+fmtDur(r.ms)+' ('+Math.round(r.ms/tot*100)+'%) · '+r.visits+' visitas · '+Object.keys(r.days).length+' dias\n'});
   t+=totalBankText();
   return t;
@@ -465,7 +472,7 @@ function vSemana(){
   var days=[],mx=1;for(var i=0;i<7;i++){var s=a+i*864e5;var t=sumRange(s,s+864e5);days.push({s:s,t:t,u:byUnit(s,s+864e5)});mx=Math.max(mx,t)}
   var dw=days.filter(function(d){return d.t>0}).length;
   h+='<section class="card"><div class="kpis"><div class="kpi"><b>'+fmtDur(tot)+'</b><span>na semana</span></div><div class="kpi"><b>'+dw+'</b><span>dias</span></div><div class="kpi"><b>'+(dw?fmtDur(tot/dw):'—')+'</b><span>média/dia</span></div></div></section>';
-  h+=bankPeriodCard(a,b,'Banco da semana')+bankTotalCard();
+  h+=bankPeriodCard(a,b,'Banco da semana','na semana')+bankTotalCard();
   h+='<section class="card"><h2>Horas por dia</h2><div class="week">'+days.map(function(d){
     var seg=d.u.map(function(r){return '<div style="height:'+(r.ms/mx*100)+'px;background:'+unitOf(r.id).color+'"></div>'}).join('');
     return '<div class="wc"><em>'+(d.t?hdec(d.t):'')+'</em><div class="stack" style="height:'+(d.t/mx*100)+'px">'+seg+'</div><small>'+DOW[new Date(d.s).getDay()]+'<br>'+pad(new Date(d.s).getDate())+'</small></div>'}).join('')+'</div></section>';
@@ -481,7 +488,7 @@ function vMes(){
   var tot=sumRange(a,b),dw=daysWorked(a,b),rows=byUnit(a,b);
   var h=dnav(new Date(a).toLocaleDateString('pt-BR',{month:'long',year:'numeric'}));
   h+='<section class="card"><div class="kpis"><div class="kpi"><b>'+fmtDur(tot)+'</b><span>no mês</span></div><div class="kpi"><b>'+dw+'</b><span>dias</span></div><div class="kpi"><b>'+(dw?fmtDur(tot/dw):'—')+'</b><span>média/dia</span></div></div></section>';
-  h+=bankPeriodCard(a,b,'Banco do mês')+bankTotalCard();
+  h+=bankPeriodCard(a,b,'Banco do mês','no mês')+bankTotalCard();
   h+='<section class="card"><h2>Tempo em cada unidade</h2>'+(rows.length?rows.map(function(r){var u=unitOf(r.id),p=Math.round(r.ms/tot*100);return '<div class="ub"><div class="l"><span><i class="dot" style="background:'+u.color+'"></i>'+esc(u.name)+'</span><span>'+fmtDur(r.ms)+' · '+p+'%</span></div><div class="bar"><i style="width:'+p+'%;background:'+u.color+'"></i></div><div class="mut" style="font-size:12px;margin-top:4px">'+r.visits+' visitas · '+Object.keys(r.days).length+' dias</div></div>'}).join(''):'<div class="empty">Sem registros neste mês.</div>')+'</section>';
   var first=(new Date(a).getDay()+6)%7,n=Math.round((b-a)/864e5),mx=1,ds=[];
   for(var i=0;i<n;i++){var t=sumRange(a+i*864e5,a+(i+1)*864e5);ds.push(t);mx=Math.max(mx,t)}
