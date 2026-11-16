@@ -256,7 +256,7 @@ function nextDay(ds){var d=new Date(ds);d.setDate(d.getDate()+1);return d.getTim
 function targetMs(ds){var o=S.cfg.off[ymd(ds)];if(o&&o.v!=null)return o.v*60000;return (+S.cfg.t[new Date(ds).getDay()]||0)*36e5}
 function periodBal(a,b,inc){
   var td=sod(new Date()).getTime(),lim=inc?nextDay(td):td,r={w:0,t:0,cr:0,db:0},d=a;
-  while(d<b&&d<lim){var w=sumRange(d,nextDay(d)),t=targetMs(d);r.w+=w;r.t+=t;if(w>t)r.cr+=w-t;else r.db+=t-w;d=nextDay(d)}
+  while(d<b&&d<lim){var w=sumRange(d,nextDay(d)),t=targetMs(d);if(d===td&&w<t){d=nextDay(d);continue}r.w+=w;r.t+=t;if(w>t)r.cr+=w-t;else r.db+=t-w;d=nextDay(d)}
   r.b=r.w-r.t;return r;
 }
 function bank(){
@@ -276,14 +276,14 @@ function bankNet(){
 function bankTotalCard(){
   if(!cfgOn())return '<section class="card"><h2>Banco de horas</h2><div class="mut" style="font-size:14px">Veja quanto você deve ou tem sobrando com a empresa, contando só o total de horas de cada dia.</div><button class="btn in" data-act="bk-cfg">Configurar banco de horas</button></section>';
   var n=bankNet();
-  return '<section class="card"><h2>Banco de horas</h2><div class="big" style="color:'+bcol(n)+'">'+fmtSgn0(n)+'</div><div class="mut">'+(Math.abs(n)<60000?'em dia com a empresa':n>0?'sobrando com a empresa':'devendo à empresa')+'</div><div class="acts"><button class="btn ghost sm" data-act="bk-cfg">Metas e saldo inicial</button><button class="btn ghost sm" data-act="adj-add">+ Ajuste</button></div></section>';
+  return '<section class="card"><h2>Banco de horas</h2><div class="big" style="color:'+bcol(n)+'">'+fmtSgn0(n)+'</div><div class="mut">'+(Math.abs(n)<60000?'em dia com a empresa':n>0?'sobrando com a empresa':'devendo à empresa')+' · contando desde '+dm(parseYmd(S.cfg.start))+'</div><div class="acts"><button class="btn ghost sm" data-act="bk-cfg">Metas e saldo inicial</button><button class="btn ghost sm" data-act="adj-add">+ Ajuste</button></div></section>';
 }
 function bankPeriodCard(a,b,title,noun){
   var td=sod(new Date()).getTime();
   if(!cfgOn()||a>=nextDay(td))return '';
-  var inc=td>=a&&td<b,r=periodBal(a,b,inc),c=inc?periodBal(a,b):r;
+  var inc=td>=a&&td<b,r=periodBal(a,b,inc),w=sumRange(td,nextDay(td)),t=targetMs(td);
   var lab=Math.abs(r.b)<60000?'Em dia com a meta':(r.b>0?'Horas a mais ':'Horas a menos ')+noun;
-  return '<section class="card"><h2>'+title+'</h2><div class="mut">'+lab+'</div><div class="big" style="color:'+bcol(r.b)+'">'+fmtSgn0(r.b)+'</div>'+(inc?'<div class="mut" style="font-size:13px">contando hoje (parcial) · até ontem: <b style="color:'+bcol(c.b)+'">'+fmtSgn0(c.b)+'</b></div>':'')+'<div class="kpis" style="margin-top:12px"><div class="kpi"><b>'+fmtDur(r.t)+'</b><span>meta</span></div><div class="kpi"><b>'+fmtDur(r.w)+'</b><span>trabalhado</span></div><div class="kpi"><b style="color:'+bcol(r.b)+'">'+fmtSgn0(r.b)+'</b><span>saldo</span></div></div></section>';
+  return '<section class="card"><h2>'+title+'</h2><div class="mut">'+lab+'</div><div class="big" style="color:'+bcol(r.b)+'">'+fmtSgn0(r.b)+'</div>'+(inc&&t>0&&w<t?'<div class="mut" style="font-size:13px">Hoje, em andamento: faltam '+fmtDur(t-w)+' para a meta</div>':'')+'<div class="kpis" style="margin-top:12px"><div class="kpi"><b>'+fmtDur(r.t)+'</b><span>meta</span></div><div class="kpi"><b>'+fmtDur(r.w)+'</b><span>trabalhado</span></div><div class="kpi"><b style="color:'+bcol(r.b)+'">'+fmtSgn0(r.b)+'</b><span>saldo</span></div></div></section>';
 }
 function bankDayCard(ds){
   if(!cfgOn())return '';
@@ -323,15 +323,15 @@ function dayBankText(a){
 function periodBankText(a,b,noun){
   var td=sod(new Date()).getTime();
   if(!cfgOn()||a>=nextDay(td))return '';
-  var inc=td>=a&&td<b,r=periodBal(a,b,inc),c=periodBal(a,b);
+  var inc=td>=a&&td<b,r=periodBal(a,b,inc),w=sumRange(td,nextDay(td)),t=targetMs(td);
   var lab=Math.abs(r.b)<60000?'Em dia com a meta':(r.b>0?'Horas a mais ':'Horas a menos ')+noun;
-  var s='Meta: '+fmtDur(r.t)+' · Trabalhado: '+fmtDur(r.w)+'\n➜ '+lab+': '+fmtSgn0(r.b)+(inc?' (contando hoje, parcial)':'')+'\n';
-  if(inc)s+='Até ontem (dias fechados): '+fmtSgn0(c.b)+'\n';
+  var s='Meta: '+fmtDur(r.t)+' · Trabalhado: '+fmtDur(r.w)+'\n➜ '+lab+': '+fmtSgn0(r.b)+'\n';
+  if(inc&&t>0&&w<t)s+='Hoje, em andamento: faltam '+fmtDur(t-w)+' para a meta\n';
   return s;
 }
 function totalBankText(){
   if(!cfgOn())return '';
-  var n=bankNet();return '\nBanco de horas acumulado: '+fmtSgn0(n)+' ('+(Math.abs(n)<60000?'em dia com a empresa':n>0?'sobrando com a empresa':'devendo à empresa')+')\n';
+  var n=bankNet();return '\nBanco de horas acumulado: '+fmtSgn0(n)+' ('+(Math.abs(n)<60000?'em dia com a empresa':n>0?'sobrando com a empresa':'devendo à empresa')+', contando desde '+dm(parseYmd(S.cfg.start))+')\n';
 }
 
 /* ---------- armazenamento ---------- */
